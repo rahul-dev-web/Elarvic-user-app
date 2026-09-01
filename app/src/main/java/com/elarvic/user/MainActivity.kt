@@ -6,6 +6,7 @@ import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -13,6 +14,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.google.firebase.auth.FirebaseAuth
@@ -70,13 +72,14 @@ class MainActivity : ComponentActivity() {
                         onResult(false, "Invalid, inactive or expired key.")
                         return@addOnSuccessListener
                     }
-                    getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                        .edit().putString(KEY_VALUE, key).apply()
+                    prefs().edit().putString(KEY_VALUE, key).apply()
                     onResult(true, "Login successful")
                 }
                 .addOnFailureListener { onResult(false, it.message ?: "Unable to verify key.") }
         }.addOnFailureListener { onResult(false, it.message ?: "Unable to connect to authentication service.") }
     }
+
+    private fun prefs() = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 }
 
 @Composable
@@ -110,12 +113,10 @@ private fun ElarvicApp(
                 }
             }
         )
-        showWhatsApp -> WhatsAppGate(
-            onOpenWhatsApp = {
-                onOpenWhatsApp()
-                showWhatsApp = false
-            }
-        )
+        showWhatsApp -> WhatsAppGate(onOpenWhatsApp = {
+            onOpenWhatsApp()
+            showWhatsApp = false
+        })
         else -> Dashboard(onLogout = {
             loggedIn = false
             showWhatsApp = false
@@ -138,6 +139,8 @@ private fun LoginScreen(
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
+        Image(painterResource(R.drawable.elarvic_mark), contentDescription = "Elarvic logo", modifier = Modifier.size(110.dp))
+        Spacer(Modifier.height(8.dp))
         Text("ELARVIC", style = MaterialTheme.typography.headlineLarge)
         Text("V1", style = MaterialTheme.typography.titleMedium)
         Spacer(Modifier.height(28.dp))
@@ -166,7 +169,7 @@ private fun WhatsAppGate(onOpenWhatsApp: () -> Unit) {
     ) {
         Text("Join our WhatsApp channel", style = MaterialTheme.typography.headlineSmall)
         Spacer(Modifier.height(10.dp))
-        Text("Tap the button below to open the official channel. After opening it, you can continue to the dashboard.")
+        Text("Tap below to open the channel. After it opens, return to Elarvic to continue.")
         Spacer(Modifier.height(24.dp))
         Button(onClick = onOpenWhatsApp, modifier = Modifier.fillMaxWidth()) { Text("Open WhatsApp") }
     }
@@ -175,22 +178,11 @@ private fun WhatsAppGate(onOpenWhatsApp: () -> Unit) {
 @Composable
 private fun Dashboard(onLogout: () -> Unit) {
     val features = listOf(
-        "CORE V10",
-        "Session Start",
-        "Internet Status",
-        "Game Boost",
-        "Background",
-        "Floating Display",
-        "VPN Connection",
-        "Notifications",
-        "Settings · Control Surface 1",
-        "Settings · Control Surface 2",
-        "Settings · Control Surface 3",
-        "Floating Button Preview",
-        "Floating Button Appearance",
-        "Color Theme"
+        "CORE V10", "Session Start", "Internet Status", "Game Boost", "Background",
+        "Floating Display", "VPN Connection", "Notifications", "Settings · Control Surface 1",
+        "Settings · Control Surface 2", "Settings · Control Surface 3", "Floating Button Preview",
+        "Floating Button Appearance", "Color Theme"
     )
-
     Column(Modifier.fillMaxSize().padding(20.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Column { Text("ELARVIC", style = MaterialTheme.typography.headlineSmall); Text("V1") }
@@ -201,8 +193,7 @@ private fun Dashboard(onLogout: () -> Unit) {
             items(features) { feature ->
                 Card(Modifier.fillMaxWidth()) {
                     Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text(feature)
-                        Text("›")
+                        Text(feature); Text("›")
                     }
                 }
             }
