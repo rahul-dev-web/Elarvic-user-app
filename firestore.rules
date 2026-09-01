@@ -1,0 +1,18 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /keys/{keyId} {
+      // User app signs in anonymously and may validate only a specific, active, non-expired key.
+      allow get: if request.auth != null
+                 && resource.data.active == true
+                 && resource.data.expiresAt > request.time;
+      allow list: if false;
+      allow create, update, delete: if false;
+    }
+
+    match /admins/{uid} {
+      allow read: if request.auth != null && request.auth.uid == uid;
+      allow write: if false;
+    }
+  }
+}
