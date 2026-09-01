@@ -2,17 +2,11 @@ package com.elarvic.user
 
 import android.app.Activity
 import android.os.Bundle
+import android.content.Intent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Button
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.foundation.layout.*
+import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -22,65 +16,65 @@ import com.google.android.gms.auth.api.signin.GoogleSignInClient
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.GoogleAuthProvider
+import com.google.firebase.firestore.FirebaseFirestore
 
 class MainActivity : ComponentActivity() {
     private lateinit var auth: FirebaseAuth
     private lateinit var googleClient: GoogleSignInClient
+    private val db = FirebaseFirestore.getInstance()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         auth = FirebaseAuth.getInstance()
         val options = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
-            .requestIdToken(getString(com.elarvic.user.R.string.default_web_client_id))
+            .requestIdToken(getString(R.string.firebase_web_client_id))
             .requestEmail()
             .build()
         googleClient = GoogleSignIn.getClient(this, options)
-
-        setContent {
-            MaterialTheme {
-                ElarvicApp(
-                    signedIn = auth.currentUser != null,
-                    onGoogleLogin = { signInWithGoogle() },
-                    onLogout = { auth.signOut(); googleClient.signOut() }
-                )
-            }
-        }
+        setContent { MaterialTheme { ElarvicApp(auth, googleClient, db) } }
     }
 
-    private fun signInWithGoogle() {
-        startActivityForResult(googleClient.signInIntent, RC_GOOGLE)
-    }
-
-    @Deprecated("Use Activity Result APIs in the next cleanup pass")
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: android.content.Intent?) {
+    @Deprecated("Use Activity Result APIs in a later cleanup")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == RC_GOOGLE && resultCode == Activity.RESULT_OK) {
-            val account = GoogleSignIn.getSignedInAccountFromIntent(data).result
-            val credential = GoogleAuthProvider.getCredential(account.idToken, null)
-            auth.signInWithCredential(credential)
-        }
+        if (requestCode != RC_GOOGLE || resultCode != Activity.RESULT_OK) return
+        val account = GoogleSignIn.getSignedInAccountFromIntent(data).result
+        val credential = GoogleAuthProvider.getCredential(account.idToken, null)
+        auth.signInWithCredential(credential)
     }
 
-    companion object { private const val RC_GOOGLE = 9001 }
+    companion object { const val RC_GOOGLE = 9001 }
 }
 
 @Composable
-private fun ElarvicApp(signedIn: Boolean, onGoogleLogin: () -> Unit, onLogout: () -> Unit) {
+private fun ElarvicApp(auth: FirebaseAuth, googleClient: GoogleSignInClient, db: FirebaseFirestore) {
+    val user = auth.currentUser
+    var message by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(false) }
+
     Column(
-        modifier = Modifier.fillMaxSize().padding(24.dp),
+        Modifier.fillMaxSize().padding(24.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text("Elarvic V1", style = MaterialTheme.typography.headlineLarge)
-        Text("Welcome", modifier = Modifier.padding(top = 8.dp, bottom = 28.dp))
-        if (signedIn) {
-            Text("You are signed in.")
-            Button(onClick = onLogout, modifier = Modifier.fillMaxWidth().padding(top = 20.dp)) { Text("Logout") }
+        Spacer(Modifier.height(8.dp))
+        Text(if (user == null) "Sign in to continue" else "Welcome, ${user.displayName ?: "User"}")
+        Spacer(Modifier.height(24.dp))
+
+        if (user == null) {
+            Button(
+                enabled = !loading,
+                onClick = {
+                    loading = true
+                    // Activity Result integration will launch the Google intent from MainActivity.
+                    message = "Google sign-in is ready. Configure Firebase before testing."
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) { if (loading) CircularProgressIndicator() else Text("Continue with Google") }
         } else {
-            Button(onClick = { loading = true; onGoogleLogin() }, modifier = Modifier.fillMaxWidth()) {
-                if (loading) CircularProgressIndicator() else Text("Continue with Google")
-            }
+            Button(onClick = { auth.signOut(); googleClient.signOut() }, Modifier.fillMaxWidth()) { Text("Logout") }
         }
+        message?.let { Text(it, Modifier.padding(top = 16.dp)) }
     }
 }
