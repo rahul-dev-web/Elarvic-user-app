@@ -1,4 +1,4 @@
 <resources>
     <string name="app_name">Elarvic V1</string>
-    <string name="firebase_web_client_id">REPLACE_WITH_FIREBASE_WEB_CLIENT_ID</string>
+    <string name="whatsapp_channel_url">https://whatsapp.com/channel/0029VbDUColKQuJI4D5IVA2L</string>
 </resources>
