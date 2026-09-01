@@ -1,71 +1,211 @@
 package com.elarvic.user
 
-import android.app.Activity
-import android.os.Bundle
+import android.content.Context
 import android.content.Intent
+import android.net.Uri
+import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
-import com.google.android.gms.auth.api.signin.GoogleSignIn
-import com.google.android.gms.auth.api.signin.GoogleSignInClient
-import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FirebaseFirestore
+import java.util.Date
+
+private const val WHATSAPP_LINK = "https://whatsapp.com/channel/0029VbDUColKQuJI4D5IVA2L"
+private const val PREFS = "elarvic_user"
+private const val KEY_VALUE = "access_key"
+private const val WHATSAPP_SEEN = "whatsapp_gate_seen"
 
 class MainActivity : ComponentActivity() {
-    private lateinit var auth: FirebaseAuth
-    private lateinit var googleClient: GoogleSignInClient
+    private val auth by lazy { FirebaseAuth.getInstance() }
+    private val db by lazy { FirebaseFirestore.getInstance() }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        auth = FirebaseAuth.getInstance()
-        val options = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
-            .requestIdToken(getString(R.string.firebase_web_client_id))
-            .requestEmail()
-            .build()
-        googleClient = GoogleSignIn.getClient(this, options)
+        val prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val savedKey = prefs.getString(KEY_VALUE, null)
+        val whatsappSeen = prefs.getBoolean(WHATSAPP_SEEN, false)
+
         setContent {
             MaterialTheme {
                 ElarvicApp(
-                    signedIn = auth.currentUser != null,
-                    onGoogleLogin = { startActivityForResult(googleClient.signInIntent, RC_GOOGLE) },
-                    onLogout = { auth.signOut(); googleClient.signOut() }
+                    savedKey = savedKey,
+                    whatsappSeen = whatsappSeen,
+                    onLogin = ::validateKey,
+                    onOpenWhatsApp = {
+                        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(WHATSAPP_LINK)))
+                        prefs.edit().putBoolean(WHATSAPP_SEEN, true).apply()
+                    },
+                    onLogout = {
+                        auth.signOut()
+                        prefs.edit().remove(KEY_VALUE).remove(WHATSAPP_SEEN).apply()
+                    }
                 )
             }
         }
     }
 
-    @Deprecated("Use Activity Result APIs in a later cleanup")
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode != RC_GOOGLE || resultCode != Activity.RESULT_OK) return
-        val account = GoogleSignIn.getSignedInAccountFromIntent(data).result
-        val credential = com.google.firebase.auth.GoogleAuthProvider.getCredential(account.idToken, null)
-        auth.signInWithCredential(credential)
-    }
+    private fun validateKey(keyInput: String, onResult: (Boolean, String) -> Unit) {
+        val key = keyInput.trim()
+        if (key.isBlank()) {
+            onResult(false, "Enter your Elarvic key.")
+            return
+        }
 
-    companion object { const val RC_GOOGLE = 9001 }
+        auth.signInAnonymously().addOnSuccessListener {
+            db.collection("keys").document(key).get()
+                .addOnSuccessListener { doc ->
+                    val active = doc.getBoolean("active") ?: false
+                    val expiresAt = doc.getTimestamp("expiresAt")?.toDate()
+                    val valid = doc.exists() && active && expiresAt != null && expiresAt.after(Date())
+                    if (!valid) {
+                        onResult(false, "Invalid, inactive or expired key.")
+                        return@addOnSuccessListener
+                    }
+                    getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                        .edit().putString(KEY_VALUE, key).apply()
+                    onResult(true, "Login successful")
+                }
+                .addOnFailureListener { onResult(false, it.message ?: "Unable to verify key.") }
+        }.addOnFailureListener { onResult(false, it.message ?: "Unable to connect to authentication service.") }
+    }
 }
 
 @Composable
-private fun ElarvicApp(signedIn: Boolean, onGoogleLogin: () -> Unit, onLogout: () -> Unit) {
+private fun ElarvicApp(
+    savedKey: String?,
+    whatsappSeen: Boolean,
+    onLogin: (String, (Boolean, String) -> Unit) -> Unit,
+    onOpenWhatsApp: () -> Unit,
+    onLogout: () -> Unit
+) {
+    var loggedIn by remember { mutableStateOf(savedKey != null) }
+    var showWhatsApp by remember { mutableStateOf(savedKey != null && !whatsappSeen) }
+    var key by remember { mutableStateOf("") }
+    var loading by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    when {
+        !loggedIn -> LoginScreen(
+            key = key,
+            onKeyChange = { key = it; error = null },
+            loading = loading,
+            error = error,
+            onLogin = {
+                loading = true
+                onLogin(key) { success, message ->
+                    loading = false
+                    if (success) {
+                        loggedIn = true
+                        showWhatsApp = true
+                    } else error = message
+                }
+            }
+        )
+        showWhatsApp -> WhatsAppGate(
+            onOpenWhatsApp = {
+                onOpenWhatsApp()
+                showWhatsApp = false
+            }
+        )
+        else -> Dashboard(onLogout = {
+            loggedIn = false
+            showWhatsApp = false
+            key = ""
+            onLogout()
+        })
+    }
+}
+
+@Composable
+private fun LoginScreen(
+    key: String,
+    onKeyChange: (String) -> Unit,
+    loading: Boolean,
+    error: String?,
+    onLogin: () -> Unit
+) {
     Column(
         Modifier.fillMaxSize().padding(24.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text("Elarvic V1", style = MaterialTheme.typography.headlineLarge)
-        Spacer(Modifier.height(8.dp))
-        Text(if (signedIn) "Signed in successfully" else "Sign in to continue")
+        Text("ELARVIC", style = MaterialTheme.typography.headlineLarge)
+        Text("V1", style = MaterialTheme.typography.titleMedium)
+        Spacer(Modifier.height(28.dp))
+        OutlinedTextField(
+            value = key,
+            onValueChange = onKeyChange,
+            label = { Text("Elarvic Key") },
+            singleLine = true,
+            visualTransformation = PasswordVisualTransformation(),
+            modifier = Modifier.fillMaxWidth()
+        )
+        error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 10.dp)) }
+        Spacer(Modifier.height(18.dp))
+        Button(onClick = onLogin, enabled = !loading, modifier = Modifier.fillMaxWidth()) {
+            if (loading) CircularProgressIndicator(modifier = Modifier.size(20.dp)) else Text("Login")
+        }
+    }
+}
+
+@Composable
+private fun WhatsAppGate(onOpenWhatsApp: () -> Unit) {
+    Column(
+        Modifier.fillMaxSize().padding(24.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text("Join our WhatsApp channel", style = MaterialTheme.typography.headlineSmall)
+        Spacer(Modifier.height(10.dp))
+        Text("Tap the button below to open the official channel. After opening it, you can continue to the dashboard.")
         Spacer(Modifier.height(24.dp))
-        if (signedIn) {
-            Button(onClick = onLogout, Modifier.fillMaxWidth()) { Text("Logout") }
-        } else {
-            Button(onClick = onGoogleLogin, Modifier.fillMaxWidth()) { Text("Continue with Google") }
+        Button(onClick = onOpenWhatsApp, modifier = Modifier.fillMaxWidth()) { Text("Open WhatsApp") }
+    }
+}
+
+@Composable
+private fun Dashboard(onLogout: () -> Unit) {
+    val features = listOf(
+        "CORE V10",
+        "Session Start",
+        "Internet Status",
+        "Game Boost",
+        "Background",
+        "Floating Display",
+        "VPN Connection",
+        "Notifications",
+        "Settings · Control Surface 1",
+        "Settings · Control Surface 2",
+        "Settings · Control Surface 3",
+        "Floating Button Preview",
+        "Floating Button Appearance",
+        "Color Theme"
+    )
+
+    Column(Modifier.fillMaxSize().padding(20.dp)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Column { Text("ELARVIC", style = MaterialTheme.typography.headlineSmall); Text("V1") }
+            TextButton(onClick = onLogout) { Text("Logout") }
+        }
+        Spacer(Modifier.height(14.dp))
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            items(features) { feature ->
+                Card(Modifier.fillMaxWidth()) {
+                    Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text(feature)
+                        Text("›")
+                    }
+                }
+            }
         }
     }
 }
