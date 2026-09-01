@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Elarvic V1</string>
+    <string name="firebase_web_client_id">REPLACE_WITH_FIREBASE_WEB_CLIENT_ID</string>
+</resources>
