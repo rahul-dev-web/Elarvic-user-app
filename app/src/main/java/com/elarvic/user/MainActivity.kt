@@ -15,7 +15,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
@@ -33,14 +32,11 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        val savedKey = prefs.getString(KEY_VALUE, null)
-        val whatsappSeen = prefs.getBoolean(WHATSAPP_SEEN, false)
-
         setContent {
             MaterialTheme {
                 ElarvicApp(
-                    savedKey = savedKey,
-                    whatsappSeen = whatsappSeen,
+                    savedKey = prefs.getString(KEY_VALUE, null),
+                    whatsappSeen = prefs.getBoolean(WHATSAPP_SEEN, false),
                     onLogin = ::validateKey,
                     onOpenWhatsApp = {
                         startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(WHATSAPP_LINK)))
@@ -61,7 +57,6 @@ class MainActivity : ComponentActivity() {
             onResult(false, "Enter your Elarvic key.")
             return
         }
-
         auth.signInAnonymously().addOnSuccessListener {
             db.collection("keys").document(key).get()
                 .addOnSuccessListener { doc ->
@@ -72,14 +67,12 @@ class MainActivity : ComponentActivity() {
                         onResult(false, "Invalid, inactive or expired key.")
                         return@addOnSuccessListener
                     }
-                    prefs().edit().putString(KEY_VALUE, key).apply()
+                    getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(KEY_VALUE, key).apply()
                     onResult(true, "Login successful")
                 }
                 .addOnFailureListener { onResult(false, it.message ?: "Unable to verify key.") }
         }.addOnFailureListener { onResult(false, it.message ?: "Unable to connect to authentication service.") }
     }
-
-    private fun prefs() = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 }
 
 @Composable
@@ -90,11 +83,33 @@ private fun ElarvicApp(
     onOpenWhatsApp: () -> Unit,
     onLogout: () -> Unit
 ) {
-    var loggedIn by remember { mutableStateOf(savedKey != null) }
-    var showWhatsApp by remember { mutableStateOf(savedKey != null && !whatsappSeen) }
+    var loggedIn by remember { mutableStateOf(false) }
+    var showWhatsApp by remember { mutableStateOf(false) }
+    var initializing by remember { mutableStateOf(savedKey != null) }
     var key by remember { mutableStateOf("") }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(savedKey) {
+        if (savedKey == null) {
+            initializing = false
+            return@LaunchedEffect
+        }
+        onLogin(savedKey) { success, message ->
+            initializing = false
+            loggedIn = success
+            showWhatsApp = success && !whatsappSeen
+            if (!success) {
+                error = message
+                onLogout()
+            }
+        }
+    }
+
+    if (initializing) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+        return
+    }
 
     when {
         !loggedIn -> LoginScreen(
@@ -127,31 +142,14 @@ private fun ElarvicApp(
 }
 
 @Composable
-private fun LoginScreen(
-    key: String,
-    onKeyChange: (String) -> Unit,
-    loading: Boolean,
-    error: String?,
-    onLogin: () -> Unit
-) {
-    Column(
-        Modifier.fillMaxSize().padding(24.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
+private fun LoginScreen(key: String, onKeyChange: (String) -> Unit, loading: Boolean, error: String?, onLogin: () -> Unit) {
+    Column(Modifier.fillMaxSize().padding(24.dp), Arrangement.Center, Alignment.CenterHorizontally) {
         Image(painterResource(R.drawable.elarvic_mark), contentDescription = "Elarvic logo", modifier = Modifier.size(110.dp))
         Spacer(Modifier.height(8.dp))
         Text("ELARVIC", style = MaterialTheme.typography.headlineLarge)
         Text("V1", style = MaterialTheme.typography.titleMedium)
         Spacer(Modifier.height(28.dp))
-        OutlinedTextField(
-            value = key,
-            onValueChange = onKeyChange,
-            label = { Text("Elarvic Key") },
-            singleLine = true,
-            visualTransformation = PasswordVisualTransformation(),
-            modifier = Modifier.fillMaxWidth()
-        )
+        OutlinedTextField(value = key, onValueChange = onKeyChange, label = { Text("Elarvic Key") }, singleLine = true, modifier = Modifier.fillMaxWidth())
         error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 10.dp)) }
         Spacer(Modifier.height(18.dp))
         Button(onClick = onLogin, enabled = !loading, modifier = Modifier.fillMaxWidth()) {
@@ -162,11 +160,7 @@ private fun LoginScreen(
 
 @Composable
 private fun WhatsAppGate(onOpenWhatsApp: () -> Unit) {
-    Column(
-        Modifier.fillMaxSize().padding(24.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
+    Column(Modifier.fillMaxSize().padding(24.dp), Arrangement.Center, Alignment.CenterHorizontally) {
         Text("Join our WhatsApp channel", style = MaterialTheme.typography.headlineSmall)
         Spacer(Modifier.height(10.dp))
         Text("Tap below to open the channel. After it opens, return to Elarvic to continue.")
@@ -177,14 +171,9 @@ private fun WhatsAppGate(onOpenWhatsApp: () -> Unit) {
 
 @Composable
 private fun Dashboard(onLogout: () -> Unit) {
-    val features = listOf(
-        "CORE V10", "Session Start", "Internet Status", "Game Boost", "Background",
-        "Floating Display", "VPN Connection", "Notifications", "Settings · Control Surface 1",
-        "Settings · Control Surface 2", "Settings · Control Surface 3", "Floating Button Preview",
-        "Floating Button Appearance", "Color Theme"
-    )
+    val features = listOf("CORE V10", "Session Start", "Internet Status", "Game Boost", "Background", "Floating Display", "VPN Connection", "Notifications", "Settings · Control Surface 1", "Settings · Control Surface 2", "Settings · Control Surface 3", "Floating Button Preview", "Floating Button Appearance", "Color Theme")
     Column(Modifier.fillMaxSize().padding(20.dp)) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
             Column { Text("ELARVIC", style = MaterialTheme.typography.headlineSmall); Text("V1") }
             TextButton(onClick = onLogout) { Text("Logout") }
         }
@@ -192,9 +181,7 @@ private fun Dashboard(onLogout: () -> Unit) {
         LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             items(features) { feature ->
                 Card(Modifier.fillMaxWidth()) {
-                    Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text(feature); Text("›")
-                    }
+                    Row(Modifier.fillMaxWidth().padding(16.dp), Arrangement.SpaceBetween) { Text(feature); Text("›") }
                 }
             }
         }
